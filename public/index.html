@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Direct room</title>
+<style>
+:root{--bg:#eef1ef;--surface:#fff;--ink:#17211e;--mute:#5d6b66;--line:#d3dbd7;--accent:#0d6b5c;--accent-ink:#fff;--warn:#a4400f}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1715;--surface:#17221f;--ink:#e6eeea;--mute:#8fa19a;--line:#2a3a35;--accent:#4cc3ab;--accent-ink:#062019;--warn:#f0a070}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;max-width:760px;margin:0 auto;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:.5rem .8rem}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+button:disabled{opacity:.45;cursor:not-allowed}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+header{padding:.9rem 1rem;border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;gap:.5rem 1rem;align-items:center;justify-content:space-between}
+h1{font-size:1.05rem;margin:0}
+#status{display:flex;align-items:center;gap:.5rem;color:var(--mute);font-size:.9rem}
+#dot{width:.6rem;height:.6rem;border-radius:50%;background:var(--mute)}
+#dot.on{background:var(--accent)}
+#dot.bad{background:var(--warn)}
+#verify{display:none;font-size:.85rem;color:var(--mute);width:100%}
+#verify b{font-variant-numeric:tabular-nums;letter-spacing:.06em;color:var(--ink)}
+#videos{display:none;position:relative;background:#000;aspect-ratio:16/9;max-height:42vh;width:100%}
+#videos.on{display:block}
+#remote{width:100%;height:100%;object-fit:contain}
+#local{position:absolute;right:.6rem;bottom:.6rem;width:26%;border-radius:8px;border:2px solid var(--surface);background:#222}
+#log{flex:1;overflow-y:auto;padding:1rem;display:flex;flex-direction:column;gap:.5rem}
+.empty{color:var(--mute);margin:auto;text-align:center;max-width:32ch}
+.m{max-width:80%;padding:.5rem .75rem;border-radius:12px;background:var(--surface);border:1px solid var(--line);overflow-wrap:anywhere;white-space:pre-wrap}
+.m.out{align-self:flex-end;background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.m.sys{align-self:center;background:none;border:none;color:var(--mute);font-size:.85rem;white-space:normal}
+.f{display:flex;flex-direction:column;gap:.35rem;min-width:min(260px,100%)}
+.f .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+.f small{opacity:.8}
+progress{width:100%;height:.4rem;accent-color:currentColor}
+.m.out .f a{color:inherit}
+form{display:flex;gap:.5rem;padding:.75rem 1rem;border-top:1px solid var(--line)}
+#text{flex:1;min-width:0;font:inherit;padding:.55rem .75rem;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
+#drop{position:fixed;inset:0;background:color-mix(in srgb,var(--accent) 80%,transparent);color:var(--accent-ink);display:none;align-items:center;justify-content:center;font-size:1.4rem;z-index:9}
+#drop.on{display:flex}
+@media (prefers-reduced-motion:no-preference){.m{animation:in .15s ease-out}@keyframes in{from{opacity:0;transform:translateY(4px)}}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Direct room</h1>
+  <div id="status"><span id="dot"></span><span id="stxt">Connecting…</span></div>
+  <div style="display:flex;gap:.5rem">
+    <button id="copy">Copy invite link</button>
+    <button id="call" disabled>Start call</button>
+  </div>
+  <div id="verify">Check this code with them by another channel: <b id="code"></b>. If it differs, the connection is not private.</div>
+</header>
+<div id="videos"><video id="remote" autoplay playsinline></video><video id="local" autoplay playsinline muted></video></div>
+<main id="log" aria-live="polite"><p class="empty" id="empty">Share the invite link. Messages, files and calls go straight between your browsers.</p></main>
+<form id="form">
+  <button type="button" id="attach" disabled aria-label="Send files">Files</button>
+  <input id="text" placeholder="Message" autocomplete="off" disabled>
+  <button class="primary" disabled id="send">Send</button>
+  <input type="file" id="picker" multiple hidden>
+</form>
+<div id="drop">Drop files to send</div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const CHUNK = 16 * 1024, BLOCK = 1024 * 1024, HIGH = 1024 * 1024, LOW = 256 * 1024;
+const MEM_LIMIT = 500 * 1024 * 1024; // refuse in-memory receives above this
+
+const rid = n => { const a = crypto.getRandomValues(new Uint8Array(n)); return btoa(String.fromCharCode(...a)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
+const fmt = n => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : n < 1073741824 ? (n / 1048576).toFixed(1) + " MB" : (n / 1073741824).toFixed(2) + " GB";
+
+let room = location.hash.slice(1);
+if (!/^[\w-]{16,64}$/.test(room)) { room = rid(16); history.replaceState(null, "", "#" + room); } // 128-bit id
+const cid = sessionStorage.getItem("cid") || rid(16); // per-tab, so two tabs can test each other
+sessionStorage.setItem("cid", cid);
+
+let ws, retry = 0, iceServers = [{ urls: "stun:stun.cloudflare.com:3478" }];
+let pc, dc, polite = false, makingOffer = false, ignoreOffer = false, localStream = null;
+
+/* ---------- UI helpers ---------- */
+function status(t, cls) { $("#stxt").textContent = t; $("#dot").className = cls || ""; }
+function bubble(cls) { $("#empty")?.remove(); const d = document.createElement("div"); d.className = "m " + cls; $("#log").append(d); d.scrollIntoView({ block: "end" }); return d; }
+function sys(t) { bubble("sys").textContent = t; }
+function msg(t, dir) { bubble(dir).textContent = t; }
+function enable(on) { for (const id of ["#text", "#send", "#attach", "#call"]) $(id).disabled = !on; }
+
+function fileRow(name, size, dir) {
+  const b = bubble(dir), w = document.createElement("div"); w.className = "f";
+  const title = document.createElement("div"); title.textContent = name + " (" + fmt(size) + ")";
+  const bar = document.createElement("progress"); bar.max = 1; bar.value = 0; bar.hidden = true;
+  const row = document.createElement("div"); row.className = "row";
+  const st = document.createElement("small");
+  w.append(title, bar, row, st); b.append(w);
+  return {
+    status: t => { st.textContent = t; },
+    progress: v => { bar.hidden = false; bar.value = v; },
+    actions: (...els) => { row.replaceChildren(...els); },
+    done: () => { bar.hidden = true; }
+  };
+}
+
+/* ---------- Signaling ---------- */
+const sig = data => ws?.readyState === 1 && ws.send(JSON.stringify(data));
+
+function connect() {
+  ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/${room}?cid=${cid}`);
+  ws.onopen = () => { retry = 0; if (!pc) status("Waiting for someone to join…"); };
+  ws.onmessage = async e => {
+    const m = JSON.parse(e.data);
+    if (m.type === "joined") { if (m.peers.length) { polite = false; newPeer(); } }
+    else if (m.type === "peer-joined") { polite = true; newPeer(); }
+    else if (m.type === "peer-left") { closePeer(); sys("They left."); status("Waiting for someone to join…"); }
+    else if (m.type === "signal") { if (!pc) newPeer(); await onSignal(m.data); }
+  };
+  ws.onclose = e => {
+    if (e.code === 4003) { status("This room already has two people.", "bad"); return; }
+    if (e.code === 4000) return; // another tab took over this client id
+    status("Reconnecting to the server…", "bad");
+    setTimeout(connect, Math.min(1000 * 2 ** retry++, 15000));
+  };
+}
+
+/* ---------- WebRTC (perfect negotiation) ---------- */
+function closePeer() {
+  enable(false); $("#verify").style.display = "none";
+  if (dc) dc.onclose = null;
+  pc?.close(); pc = dc = null; inc = null;
+  $("#videos").classList.remove("on"); $("#remote").srcObject = null;
+  if (localStream) $("#videos").classList.add("on");
+}
+
+function newPeer() {
+  closePeer();
+  makingOffer = ignoreOffer = false;
+  const p = pc = new RTCPeerConnection({ iceServers });
+  p.onicecandidate = ({ candidate }) => { if (p === pc && candidate) sig({ candidate }); };
+  p.onnegotiationneeded = async () => {
+    try { makingOffer = true; await p.setLocalDescription(); sig({ description: p.localDescription }); }
+    catch (e) { console.error(e); } finally { makingOffer = false; }
+  };
+  p.onconnectionstatechange = async () => {
+    if (p !== pc) return;
+    const s = p.connectionState;
+    if (s === "connected") {
+      status("Connected directly", "on");
+      try { $("#code").textContent = await verifyCode(p); $("#verify").style.display = "block"; } catch {}
+    } else if (s === "connecting") status("Connecting…");
+    else if (s === "disconnected") status("Connection unstable…", "bad");
+    else if (s === "failed") { status("Connection failed. Retrying…", "bad"); p.restartIce(); }
+  };
+  p.ontrack = ({ streams: [s] }) => { if (!s) return; $("#remote").srcObject = s; $("#videos").classList.add("on"); };
+  // Both sides create the same pre-negotiated channel, so there is no offerer/answerer asymmetry.
+  dc = p.createDataChannel("chat", { negotiated: true, id: 0 });
+  setupChannel(dc);
+  localStream?.getTracks().forEach(t => p.addTrack(t, localStream));
+}
+
+async function onSignal({ description, candidate }) {
+  const p = pc;
+  try {
+    if (description) {
+      const collision = description.type === "offer" && (makingOffer || p.signalingState !== "stable");
+      ignoreOffer = !polite && collision;
+      if (ignoreOffer) return;
+      await p.setRemoteDescription(description);
+      if (description.type === "offer") { await p.setLocalDescription(); sig({ description: p.localDescription }); }
+    } else if (candidate) {
+      try { await p.addIceCandidate(candidate); } catch (e) { if (!ignoreOffer) throw e; }
+    }
+  } catch (e) { console.error(e); }
+}
+
+// Short code derived from both DTLS fingerprints. If a tampered signaling server swapped them, the two codes differ.
+async function verifyCode(p) {
+  const fp = s => (s.match(/a=fingerprint:\S+ (\S+)/) || [])[1] || "";
+  const joined = [fp(p.currentLocalDescription.sdp), fp(p.currentRemoteDescription.sdp)].sort().join("|");
+  const h = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(joined)));
+  return [...h.slice(0, 4)].map(x => x.toString(16).padStart(2, "0")).join("").replace(/(.{4})(.{4})/, "$1 $2");
+}
+
+/* ---------- Data channel: chat + files ---------- */
+const waiters = {};
+let inc = null, sendChain = Promise.resolve();
+
+function setupChannel(c) {
+  c.binaryType = "arraybuffer";
+  c.bufferedAmountLowThreshold = LOW;
+  c.onopen = () => { enable(true); sys("Connected. Say hello."); $("#text").focus(); };
+  c.onclose = () => { enable(false); };
+  c.onmessage = e => typeof e.data === "string" ? onControl(JSON.parse(e.data)) : onChunk(e.data);
+}
+
+const ctl = o => dc?.readyState === "open" && dc.send(JSON.stringify(o));
+
+function onControl(m) {
+  switch (m.t) {
+    case "msg": msg(String(m.text), "in"); break;
+    case "file-start": offerFile(m); break;
+    case "file-accept": waiters[m.id]?.(true); break;
+    case "file-reject": waiters[m.id]?.(false); break;
+    case "file-end": finishFile(m.id); break;
+    case "call-end": $("#remote").srcObject = null; if (!localStream) $("#videos").classList.remove("on"); sys("Call ended."); break;
+  }
+}
+
+function offerFile(m) {
+  const ui = fileRow(String(m.name).slice(0, 200), +m.size || 0, "in");
+  const can = !!window.showSaveFilePicker;
+  if (!can && m.size > MEM_LIMIT) { ui.status("Too large for this browser. Use Chrome or Edge to receive it."); ctl({ t: "file-reject", id: m.id }); return; }
+  const yes = Object.assign(document.createElement("button"), { textContent: "Accept" });
+  const no = Object.assign(document.createElement("button"), { textContent: "Decline" });
+  ui.actions(yes, no);
+  no.onclick = () => { ui.actions(); ui.status("Declined"); ctl({ t: "file-reject", id: m.id }); };
+  yes.onclick = async () => {
+    const i = { id: m.id, size: m.size, name: m.name, got: 0, parts: [], w: null, chain: Promise.resolve(), ui };
+    if (can) { // user gesture is available here, so the save dialog can open
+      try { i.w = await showSaveFilePicker({ suggestedName: m.name }); i.w = await i.w.createWritable(); }
+      catch { return; }
+    }
+    ui.actions(); ui.status("Receiving…"); inc = i;
+    ctl({ t: "file-accept", id: m.id });
+  };
+}
+
+function onChunk(buf) {
+  const i = inc; if (!i) return;
+  i.got += buf.byteLength;
+  if (i.w) i.chain = i.chain.then(() => i.w.write(buf)); else i.parts.push(buf);
+  i.ui.progress(i.got / i.size);
+}
+
+async function finishFile(id) {
+  const i = inc; if (!i || i.id !== id) return;
+  inc = null;
+  await i.chain.catch(() => {});
+  i.ui.done();
+  if (i.got !== i.size) { i.ui.status("Incomplete transfer"); return; }
+  if (i.w) { await i.w.close(); i.ui.status("Saved"); return; }
+  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob(i.parts)), download: i.name, textContent: "Download " + i.name });
+  i.ui.actions(a); i.ui.status("Received");
+}
+
+const drain = c => new Promise(r => {
+  const f = () => { c.removeEventListener("bufferedamountlow", f); c.removeEventListener("close", f); r(); };
+  c.addEventListener("bufferedamountlow", f); c.addEventListener("close", f);
+});
+
+async function sendFile(file) {
+  const c = dc; if (!c || c.readyState !== "open") return;
+  const id = rid(6), ui = fileRow(file.name, file.size, "out");
+  ctl({ t: "file-start", id, name: file.name, size: file.size });
+  ui.status("Waiting for them to accept…");
+  const ok = await new Promise(r => { waiters[id] = r; });
+  delete waiters[id];
+  if (!ok) { ui.status("Declined"); return; }
+  for (let off = 0; off < file.size; off += BLOCK) {
+    const block = new Uint8Array(await file.slice(off, off + BLOCK).arrayBuffer());
+    for (let o = 0; o < block.length; o += CHUNK) {
+      if (c.readyState !== "open") { ui.status("Connection lost"); return; }
+      if (c.bufferedAmount > HIGH) await drain(c);
+      c.send(block.subarray(o, o + CHUNK));
+    }
+    ui.progress(Math.min(off + BLOCK, file.size) / file.size);
+  }
+  c.send(JSON.stringify({ t: "file-end", id }));
+  ui.done(); ui.status("Sent");
+}
+const queueFiles = files => { for (const f of files) sendChain = sendChain.then(() => sendFile(f)).catch(console.error); };
+
+/* ---------- Calls ---------- */
+async function toggleCall() {
+  if (localStream) {
+    pc?.getSenders().forEach(s => { if (s.track && localStream.getTracks().includes(s.track)) pc.removeTrack(s); });
+    localStream.getTracks().forEach(t => t.stop());
+    localStream = null; $("#local").srcObject = null; $("#local").style.display = "none";
+    if (!$("#remote").srcObject) $("#videos").classList.remove("on");
+    $("#call").textContent = "Start call"; ctl({ t: "call-end" }); return;
+  }
+  try { localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true }); }
+  catch { sys("Camera or microphone access was blocked. Allow it in your browser settings and try again."); return; }
+  $("#local").srcObject = localStream; $("#local").style.display = ""; $("#videos").classList.add("on");
+  $("#call").textContent = "End call";
+  localStream.getTracks().forEach(t => pc?.addTrack(t, localStream));
+}
+
+/* ---------- Wiring ---------- */
+$("#form").onsubmit = e => {
+  e.preventDefault();
+  const t = $("#text").value.trim(); if (!t) return;
+  ctl({ t: "msg", text: t }); msg(t, "out"); $("#text").value = "";
+};
+$("#attach").onclick = () => $("#picker").click();
+$("#picker").onchange = e => { queueFiles([...e.target.files]); e.target.value = ""; };
+$("#call").onclick = toggleCall;
+$("#copy").onclick = async () => { try { await navigator.clipboard.writeText(location.href); $("#copy").textContent = "Copied"; setTimeout(() => $("#copy").textContent = "Copy invite link", 1500); } catch { prompt("Invite link", location.href); } };
+let dragDepth = 0;
+addEventListener("dragenter", e => { e.preventDefault(); dragDepth++; $("#drop").classList.add("on"); });
+addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; $("#drop").classList.remove("on"); } });
+addEventListener("dragover", e => e.preventDefault());
+addEventListener("drop", e => { e.preventDefault(); dragDepth = 0; $("#drop").classList.remove("on"); if (dc?.readyState === "open") queueFiles([...e.dataTransfer.files]); });
+$("#local").style.display = "none";
+
+(async () => {
+  try { const r = await fetch("/api/ice"); if (r.ok) iceServers = (await r.json()).iceServers; } catch {}
+  connect();
+})();
+</script>
+</body>
+</html>
