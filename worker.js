@@ -3,6 +3,7 @@ import { DurableObject } from "cloudflare:workers";
 const ID_RE = /^[\w-]{16,64}$/;
 const MAX_PEERS = 2;
 const MAX_SIGNAL_BYTES = 16 * 1024;
+const MAX_STORED = 20000; // keep the newest N messages
 const FALLBACK_ICE = { iceServers: [{ urls: "stun:stun.cloudflare.com:3478" }] };
 
 export default {
@@ -51,6 +52,12 @@ export default {
 };
 
 export class Room extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    // Message history lives in this room's SQLite database. Bodies are ciphertext made in the browser.
+    ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS m (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, sender TEXT, body TEXT)");
+  }
+
   #live(exceptWs) {
     return this.ctx
       .getWebSockets()
@@ -89,6 +96,28 @@ export class Room extends DurableObject {
     if (typeof message !== "string" || message.length > MAX_SIGNAL_BYTES) return;
     let data;
     try { data = JSON.parse(message); } catch { return; }
+    const sql = this.ctx.storage.sql;
+
+    if (data.type === "store") {
+      const body = typeof data.body === "string" ? data.body : "";
+      const sender = typeof data.sender === "string" ? data.sender.slice(0, 64) : "";
+      if (!body || body.length > 12000) return;
+      const ts = Date.now();
+      const id = sql.exec("INSERT INTO m (ts, sender, body) VALUES (?, ?, ?) RETURNING id", ts, sender, body).one().id;
+      sql.exec("DELETE FROM m WHERE id <= ?", id - MAX_STORED);
+      const out = JSON.stringify({ type: "msg", msg: { id, ts, sender, body } });
+      for (const o of this.#live()) o.send(out); // includes the sender, which is how it sees its own message
+      return;
+    }
+    if (data.type === "sync") {
+      const after = Number.isInteger(data.after) ? data.after : 0;
+      const msgs = sql.exec(
+        "SELECT id, ts, sender, body FROM (SELECT * FROM m WHERE id > ? ORDER BY id DESC LIMIT 500) ORDER BY id", after
+      ).toArray();
+      ws.send(JSON.stringify({ type: "history", msgs }));
+      return;
+    }
+
     const out = JSON.stringify({ type: "signal", data });
     for (const o of this.#live(ws)) o.send(out);
   }
