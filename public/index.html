@@ -20,8 +20,10 @@ h1{font-size:1.05rem;margin:0}
 #dot{width:.6rem;height:.6rem;border-radius:50%;background:var(--mute)}
 #dot.on{background:var(--accent)}
 #dot.bad{background:var(--warn)}
-#verify{display:none;font-size:.85rem;color:var(--mute);width:100%}
-#verify b{font-variant-numeric:tabular-nums;letter-spacing:.06em;color:var(--ink)}
+#verify{display:none;font-size:.85rem;color:var(--warn);width:100%}
+#gate{position:fixed;inset:0;background:var(--bg);z-index:10;display:flex;align-items:center;justify-content:center;padding:1rem}
+#gate form{border:none;flex-direction:column;max-width:24rem;width:100%;padding:0}
+#gate h2{margin:0}#gate p{color:var(--mute);margin:0}#gateErr{color:var(--warn)!important}
 #videos{display:none;position:relative;background:#000;aspect-ratio:16/9;max-height:42vh;width:100%}
 #videos.on{display:block}
 #remote{width:100%;height:100%;object-fit:contain}
@@ -48,19 +50,20 @@ form{display:flex;gap:.5rem;padding:.75rem 1rem;border-top:1px solid var(--line)
   <h1>Direct room</h1>
   <div id="status"><span id="dot"></span><span id="stxt">Connecting…</span></div>
   <div style="display:flex;gap:.5rem">
-    <button id="copy">Copy invite link</button>
+    <button id="lock">Lock</button>
     <button id="call" disabled>Start call</button>
   </div>
-  <div id="verify">Check this code with them by another channel: <b id="code"></b>. If it differs, the connection is not private.</div>
+  <div id="verify">Security check failed. The other side does not know your passphrase, or the connection was tampered with. It was closed.</div>
 </header>
 <div id="videos"><video id="remote" autoplay playsinline></video><video id="local" autoplay playsinline muted></video></div>
-<main id="log" aria-live="polite"><p class="empty" id="empty">Share the invite link. Messages, files and calls go straight between your browsers.</p></main>
+<main id="log" aria-live="polite"><p class="empty" id="empty">Messages are saved, encrypted with your passphrase. Files and calls go straight between your browsers.</p></main>
 <form id="form">
   <button type="button" id="attach" disabled aria-label="Send files">Files</button>
   <input id="text" placeholder="Message" autocomplete="off" disabled>
   <button class="primary" disabled id="send">Send</button>
   <input type="file" id="picker" multiple hidden>
 </form>
+<div id="gate"><form id="gateForm"><h2>Private room</h2><p>Enter the passphrase you and the other person agreed on. Use something long, like four random words.</p><input id="pass" type="password" autocomplete="current-password" aria-label="Passphrase" style="font:inherit;padding:.55rem .75rem;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink)"><button class="primary">Unlock</button><p id="gateErr"></p></form></div>
 <div id="drop">Drop files to send</div>
 
 <script>
@@ -69,14 +72,17 @@ const $ = s => document.querySelector(s);
 const CHUNK = 16 * 1024, BLOCK = 1024 * 1024, HIGH = 1024 * 1024, LOW = 256 * 1024;
 const MEM_LIMIT = 500 * 1024 * 1024; // refuse in-memory receives above this
 
-const rid = n => { const a = crypto.getRandomValues(new Uint8Array(n)); return btoa(String.fromCharCode(...a)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
+const b64u = a => btoa(String.fromCharCode(...a)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const unb64u = s => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
+const rid = n => b64u(crypto.getRandomValues(new Uint8Array(n)));
 const fmt = n => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : n < 1073741824 ? (n / 1048576).toFixed(1) + " MB" : (n / 1073741824).toFixed(2) + " GB";
 
-let room = location.hash.slice(1);
-if (!/^[\w-]{16,64}$/.test(room)) { room = rid(16); history.replaceState(null, "", "#" + room); } // 128-bit id
+let room, macKey, encKey, authed = false, myMac = null, peerMac = null;
 const cid = sessionStorage.getItem("cid") || rid(16); // per-tab, so two tabs can test each other
 sessionStorage.setItem("cid", cid);
 
+let dev; try { dev = localStorage.getItem("p2pdev") || rid(12); localStorage.setItem("p2pdev", dev); } catch { dev = rid(12); }
+const seen = new Set(); let last = 0;
 let ws, retry = 0, iceServers = [{ urls: "stun:stun.cloudflare.com:3478" }];
 let pc, dc, polite = false, makingOffer = false, ignoreOffer = false, localStream = null;
 
@@ -84,8 +90,12 @@ let pc, dc, polite = false, makingOffer = false, ignoreOffer = false, localStrea
 function status(t, cls) { $("#stxt").textContent = t; $("#dot").className = cls || ""; }
 function bubble(cls) { $("#empty")?.remove(); const d = document.createElement("div"); d.className = "m " + cls; $("#log").append(d); d.scrollIntoView({ block: "end" }); return d; }
 function sys(t) { bubble("sys").textContent = t; }
-function msg(t, dir) { bubble(dir).textContent = t; }
-function enable(on) { for (const id of ["#text", "#send", "#attach", "#call"]) $(id).disabled = !on; }
+function msg(t, dir, ts) {
+  const b = bubble(dir); b.textContent = t;
+  if (ts) { const s = document.createElement("small"); s.style.cssText = "display:block;opacity:.7;font-size:.75rem"; s.textContent = new Date(ts).toLocaleString([], { dateStyle: "short", timeStyle: "short" }); b.append(s); }
+}
+function enable(on) { for (const id of ["#attach", "#call"]) $(id).disabled = !on; } // files and calls need the direct link
+function chatEnable(on) { for (const id of ["#text", "#send"]) $(id).disabled = !on; }
 
 function fileRow(name, size, dir) {
   const b = bubble(dir), w = document.createElement("div"); w.className = "f";
@@ -107,10 +117,12 @@ const sig = data => ws?.readyState === 1 && ws.send(JSON.stringify(data));
 
 function connect() {
   ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/${room}?cid=${cid}`);
-  ws.onopen = () => { retry = 0; if (!pc) status("Waiting for someone to join…"); };
+  ws.onopen = () => { retry = 0; chatEnable(true); sig({ type: "sync", after: last }); if (!pc) status("Online. Files and calls connect when they are here."); };
   ws.onmessage = async e => {
     const m = JSON.parse(e.data);
-    if (m.type === "joined") { if (m.peers.length) { polite = false; newPeer(); } }
+    if (m.type === "history") { for (const x of m.msgs) await show(x); }
+    else if (m.type === "msg") await show(m.msg);
+    else if (m.type === "joined") { if (m.peers.length) { polite = false; newPeer(); } }
     else if (m.type === "peer-joined") { polite = true; newPeer(); }
     else if (m.type === "peer-left") { closePeer(); sys("They left."); status("Waiting for someone to join…"); }
     else if (m.type === "signal") { if (!pc) newPeer(); await onSignal(m.data); }
@@ -118,7 +130,7 @@ function connect() {
   ws.onclose = e => {
     if (e.code === 4003) { status("This room already has two people.", "bad"); return; }
     if (e.code === 4000) return; // another tab took over this client id
-    status("Reconnecting to the server…", "bad");
+    chatEnable(false); status("Reconnecting to the server…", "bad");
     setTimeout(connect, Math.min(1000 * 2 ** retry++, 15000));
   };
 }
@@ -127,7 +139,7 @@ function connect() {
 function closePeer() {
   enable(false); $("#verify").style.display = "none";
   if (dc) dc.onclose = null;
-  pc?.close(); pc = dc = null; inc = null;
+  pc?.close(); pc = dc = null; inc = null; authed = false; myMac = peerMac = null;
   $("#videos").classList.remove("on"); $("#remote").srcObject = null;
   if (localStream) $("#videos").classList.add("on");
 }
@@ -145,17 +157,15 @@ function newPeer() {
     if (p !== pc) return;
     const s = p.connectionState;
     if (s === "connected") {
-      status("Connected directly", "on");
-      try { $("#code").textContent = await verifyCode(p); $("#verify").style.display = "block"; } catch {}
+      if (!authed) status("Verifying…");
     } else if (s === "connecting") status("Connecting…");
     else if (s === "disconnected") status("Connection unstable…", "bad");
     else if (s === "failed") { status("Connection failed. Retrying…", "bad"); p.restartIce(); }
   };
-  p.ontrack = ({ streams: [s] }) => { if (!s) return; $("#remote").srcObject = s; $("#videos").classList.add("on"); };
+  p.ontrack = ({ streams: [s] }) => { if (!s) return; $("#remote").srcObject = s; if (authed) $("#videos").classList.add("on"); };
   // Both sides create the same pre-negotiated channel, so there is no offerer/answerer asymmetry.
   dc = p.createDataChannel("chat", { negotiated: true, id: 0 });
   setupChannel(dc);
-  localStream?.getTracks().forEach(t => p.addTrack(t, localStream));
 }
 
 async function onSignal({ description, candidate }) {
@@ -173,12 +183,20 @@ async function onSignal({ description, candidate }) {
   } catch (e) { console.error(e); }
 }
 
-// Short code derived from both DTLS fingerprints. If a tampered signaling server swapped them, the two codes differ.
-async function verifyCode(p) {
-  const fp = s => (s.match(/a=fingerprint:\S+ (\S+)/) || [])[1] || "";
+// Both sides MAC the pair of DTLS fingerprints with a key derived from the passphrase.
+// If the signaling server swapped fingerprints, the MACs differ and the channel is closed.
+async function macFor(p) {
+  const fp = x => (x.match(/a=fingerprint:\S+ (\S+)/) || [])[1] || "";
   const joined = [fp(p.currentLocalDescription.sdp), fp(p.currentRemoteDescription.sdp)].sort().join("|");
-  const h = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(joined)));
-  return [...h.slice(0, 4)].map(x => x.toString(16).padStart(2, "0")).join("").replace(/(.{4})(.{4})/, "$1 $2");
+  return b64u(new Uint8Array(await crypto.subtle.sign("HMAC", macKey, new TextEncoder().encode(joined))));
+}
+function checkAuth() {
+  if (authed || !myMac || !peerMac) return;
+  if (myMac !== peerMac) { closePeer(); $("#verify").style.display = "block"; status("Not verified", "bad"); return; }
+  authed = true; enable(true); status("Connected and verified", "on");
+  localStream?.getTracks().forEach(t => pc.addTrack(t, localStream));
+  if ($("#remote").srcObject) $("#videos").classList.add("on");
+  sys("Connected and verified."); $("#text").focus();
 }
 
 /* ---------- Data channel: chat + files ---------- */
@@ -188,7 +206,7 @@ let inc = null, sendChain = Promise.resolve();
 function setupChannel(c) {
   c.binaryType = "arraybuffer";
   c.bufferedAmountLowThreshold = LOW;
-  c.onopen = () => { enable(true); sys("Connected. Say hello."); $("#text").focus(); };
+  c.onopen = async () => { try { myMac = await macFor(pc); ctl({ t: "auth", mac: myMac }); checkAuth(); } catch (e) { console.error(e); } };
   c.onclose = () => { enable(false); };
   c.onmessage = e => typeof e.data === "string" ? onControl(JSON.parse(e.data)) : onChunk(e.data);
 }
@@ -196,8 +214,9 @@ function setupChannel(c) {
 const ctl = o => dc?.readyState === "open" && dc.send(JSON.stringify(o));
 
 function onControl(m) {
+  if (m.t === "auth") { peerMac = String(m.mac); checkAuth(); return; }
+  if (!authed) return;
   switch (m.t) {
-    case "msg": msg(String(m.text), "in"); break;
     case "file-start": offerFile(m); break;
     case "file-accept": waiters[m.id]?.(true); break;
     case "file-reject": waiters[m.id]?.(false); break;
@@ -287,15 +306,16 @@ async function toggleCall() {
 }
 
 /* ---------- Wiring ---------- */
-$("#form").onsubmit = e => {
+$("#form").onsubmit = async e => {
   e.preventDefault();
-  const t = $("#text").value.trim(); if (!t) return;
-  ctl({ t: "msg", text: t }); msg(t, "out"); $("#text").value = "";
+  const t = $("#text").value.trim().slice(0, 4000); if (!t) return;
+  $("#text").value = "";
+  sig({ type: "store", sender: dev, body: await encText(JSON.stringify({ text: t })) });
 };
 $("#attach").onclick = () => $("#picker").click();
 $("#picker").onchange = e => { queueFiles([...e.target.files]); e.target.value = ""; };
 $("#call").onclick = toggleCall;
-$("#copy").onclick = async () => { try { await navigator.clipboard.writeText(location.href); $("#copy").textContent = "Copied"; setTimeout(() => $("#copy").textContent = "Copy invite link", 1500); } catch { prompt("Invite link", location.href); } };
+$("#lock").onclick = () => { localStorage.removeItem("p2pkey"); location.reload(); };
 let dragDepth = 0;
 addEventListener("dragenter", e => { e.preventDefault(); dragDepth++; $("#drop").classList.add("on"); });
 addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; $("#drop").classList.remove("on"); } });
@@ -303,10 +323,46 @@ addEventListener("dragover", e => e.preventDefault());
 addEventListener("drop", e => { e.preventDefault(); dragDepth = 0; $("#drop").classList.remove("on"); if (dc?.readyState === "open") queueFiles([...e.dataTransfer.files]); });
 $("#local").style.display = "none";
 
-(async () => {
+// Passphrase -> 64 bytes: first 32 name the room, last 32 key the HMAC. The server only sees the room name.
+async function encText(text) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, encKey, new TextEncoder().encode(text)));
+  const out = new Uint8Array(12 + ct.length); out.set(iv); out.set(ct, 12);
+  return b64u(out);
+}
+async function decText(b) {
+  const a = unb64u(b);
+  return new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: a.slice(0, 12) }, encKey, a.slice(12)));
+}
+async function show(m) {
+  if (seen.has(m.id)) return;
+  seen.add(m.id); last = Math.max(last, m.id);
+  let t; try { t = JSON.parse(await decText(m.body)).text; } catch { return; } // not encrypted with our key: ignore
+  msg(String(t), m.sender === dev ? "out" : "in", m.ts);
+}
+async function derive(pass) {
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pass.normalize("NFKC").trim()), "PBKDF2", false, ["deriveBits"]);
+  return new Uint8Array(await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: new TextEncoder().encode("p2p-room-v1"), iterations: 310000 }, base, 512));
+}
+async function start(bits) {
+  room = b64u(bits.slice(0, 32));
+  macKey = await crypto.subtle.importKey("raw", bits.slice(32), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const hk = await crypto.subtle.importKey("raw", bits.slice(32), "HKDF", false, ["deriveKey"]);
+  encKey = await crypto.subtle.deriveKey({ name: "HKDF", hash: "SHA-256", salt: new Uint8Array(), info: new TextEncoder().encode("p2p-room-msg-v1") }, hk, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+  $("#gate").style.display = "none";
   try { const r = await fetch("/api/ice"); if (r.ok) iceServers = (await r.json()).iceServers; } catch {}
   connect();
-})();
+}
+$("#gateForm").onsubmit = async e => {
+  e.preventDefault();
+  const v = $("#pass").value;
+  if (v.trim().length < 12) { $("#gateErr").textContent = "Use at least 12 characters."; return; }
+  $("#gateErr").textContent = "Unlocking…";
+  const bits = await derive(v);
+  localStorage.setItem("p2pkey", b64u(bits)); // stays on this device until you press Lock
+  $("#pass").value = ""; start(bits);
+};
+try { const k = localStorage.getItem("p2pkey"); if (k) start(unb64u(k)); else $("#pass").focus(); } catch { $("#pass").focus(); }
 </script>
 </body>
 </html>
