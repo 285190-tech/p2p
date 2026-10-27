@@ -1,4 +1,4 @@
-name = "p2p-room"
+name = "p2p"
 main = "worker.js"
 compatibility_date = "2025-01-01"
 
