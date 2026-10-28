@@ -58,14 +58,18 @@ export class Room extends DurableObject {
     ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS m (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, sender TEXT, body TEXT)");
   }
 
-  #live(exceptWs) {
+  #all(exceptWs) {
     return this.ctx
       .getWebSockets()
       .filter((w) => w !== exceptWs && w.readyState === 1 && !w.deserializeAttachment()?.replaced);
   }
+  // "Listener" sockets only receive stored messages. They are invisible to peers and to the 2-person cap.
+  #live(exceptWs) { return this.#all(exceptWs).filter((w) => !w.deserializeAttachment()?.listen); }
 
   async fetch(request) {
-    const cid = new URL(request.url).searchParams.get("cid") || "";
+    const q = new URL(request.url).searchParams;
+    const cid = q.get("cid") || "";
+    const listen = q.get("listen") === "1";
     if (!ID_RE.test(cid)) return new Response("Bad client id", { status: 400 });
 
     // Same client reconnecting: retire the ghost socket silently.
@@ -79,16 +83,18 @@ export class Room extends DurableObject {
     const [client, server] = Object.values(new WebSocketPair());
     const others = this.#live();
 
-    if (others.length >= MAX_PEERS) {
+    if (!listen && others.length >= MAX_PEERS) {
       server.accept();
       server.close(4003, "room full");
       return new Response(null, { status: 101, webSocket: client });
     }
 
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ cid }); // survives hibernation
-    server.send(JSON.stringify({ type: "joined", peers: others.map((w) => w.deserializeAttachment().cid) }));
-    for (const o of others) o.send(JSON.stringify({ type: "peer-joined", id: cid }));
+    server.serializeAttachment({ cid, listen }); // survives hibernation
+    if (!listen) {
+      server.send(JSON.stringify({ type: "joined", peers: others.map((w) => w.deserializeAttachment().cid) }));
+      for (const o of others) o.send(JSON.stringify({ type: "peer-joined", id: cid }));
+    }
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -106,7 +112,7 @@ export class Room extends DurableObject {
       const id = sql.exec("INSERT INTO m (ts, sender, body) VALUES (?, ?, ?) RETURNING id", ts, sender, body).one().id;
       sql.exec("DELETE FROM m WHERE id <= ?", id - MAX_STORED);
       const out = JSON.stringify({ type: "msg", msg: { id, ts, sender, body } });
-      for (const o of this.#live()) o.send(out); // includes the sender, which is how it sees its own message
+      for (const o of this.#all()) o.send(out); // everyone, including the sender and listeners
       return;
     }
     if (data.type === "sync") {
@@ -125,7 +131,7 @@ export class Room extends DurableObject {
   #gone(ws) {
     try { ws.close(); } catch {}
     const a = ws.deserializeAttachment();
-    if (!a || a.replaced) return;
+    if (!a || a.replaced || a.listen) return;
     for (const o of this.#live(ws)) o.send(JSON.stringify({ type: "peer-left", id: a.cid }));
   }
 
