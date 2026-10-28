@@ -5,65 +5,108 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Direct room</title>
 <style>
-:root{--bg:#eef1ef;--surface:#fff;--ink:#17211e;--mute:#5d6b66;--line:#d3dbd7;--accent:#0d6b5c;--accent-ink:#fff;--warn:#a4400f}
-@media (prefers-color-scheme:dark){:root{--bg:#0f1715;--surface:#17221f;--ink:#e6eeea;--mute:#8fa19a;--line:#2a3a35;--accent:#4cc3ab;--accent-ink:#062019;--warn:#f0a070}}
+:root{--bg:#fff;--chatbg:#dbe5ea;--ink:#000;--mute:#707579;--line:#e4e6e8;--accent:#3390ec;--in:#fff;--out:#eeffde;--out-ink:#000;--warn:#c0471b;--hover:#f4f4f5}
+@media (prefers-color-scheme:dark){:root{--bg:#212121;--chatbg:#0f0f0f;--ink:#fff;--mute:#aaa;--line:#2f2f2f;--accent:#8774e1;--in:#212121;--out:#766ac8;--out-ink:#fff;--hover:#2c2c2c;--warn:#f0a070}}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
-body{background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;max-width:760px;margin:0 auto;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
-button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:.5rem .8rem}
-button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
-button:disabled{opacity:.45;cursor:not-allowed}
+body{background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+button{font:inherit;cursor:pointer;border:0;background:none;color:inherit;border-radius:8px;padding:.45rem .6rem}
+button:hover{background:var(--hover)}
+button.primary{background:var(--accent);color:#fff}
+button:disabled{opacity:.4;cursor:not-allowed}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-header{padding:.9rem 1rem;border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;gap:.5rem 1rem;align-items:center;justify-content:space-between}
-h1{font-size:1.05rem;margin:0}
-#status{display:flex;align-items:center;gap:.5rem;color:var(--mute);font-size:.9rem}
-#dot{width:.6rem;height:.6rem;border-radius:50%;background:var(--mute)}
-#dot.on{background:var(--accent)}
-#dot.bad{background:var(--warn)}
-#verify{display:none;font-size:.85rem;color:var(--warn);width:100%}
-#gate{position:fixed;inset:0;background:var(--bg);z-index:10;display:flex;align-items:center;justify-content:center;padding:1rem}
-#gate form{border:none;flex-direction:column;max-width:24rem;width:100%;padding:0}
-#gate h2{margin:0}#gate p{color:var(--mute);margin:0}#gateErr{color:var(--warn)!important}
+#app{display:grid;grid-template-columns:320px 1fr;height:100%}
+#side{border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.top{display:flex;align-items:center;gap:.4rem;padding:.6rem .75rem}.top b{flex:1;font-size:1.15rem}
+#chats{list-style:none;margin:0;padding:0 .35rem;overflow-y:auto;flex:1}
+#chats li{display:flex;gap:.7rem;padding:.55rem .6rem;cursor:pointer;border-radius:10px}
+#chats li:hover{background:var(--hover)}#chats li.on{background:var(--accent);color:#fff}
+.av{width:3rem;height:3rem;border-radius:50%;flex:none;display:grid;place-items:center;color:#fff;font-weight:600;font-size:1.2rem}
+.mid{flex:1;min-width:0}.r1,.r2{display:flex;gap:.5rem;justify-content:space-between;align-items:center}
+.r1 b,.r2 span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.r1 time,.r2 span{color:var(--mute);font-size:.85rem}
+li.on .r1 time,li.on .r2 span{color:#ffffffd0}
+.badge{background:var(--accent);color:#fff;border-radius:999px;min-width:1.4rem;padding:0 .4rem;text-align:center;font-size:.8rem;font-style:normal}
+li.on .badge{background:#fff;color:var(--accent)}
+#chat{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--chatbg)}
+#chat>header{background:var(--bg);padding:.5rem .75rem;display:flex;align-items:center;gap:.6rem;border-bottom:1px solid var(--line)}
+#chat>header .av{width:2.5rem;height:2.5rem;font-size:1rem}
+.who{flex:1;min-width:0;display:flex;flex-direction:column}.who b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#status{display:flex;align-items:center;gap:.4rem;color:var(--mute);font-size:.8rem}
+#dot{width:.5rem;height:.5rem;border-radius:50%;background:var(--mute)}#dot.on{background:#35c759}#dot.bad{background:var(--warn)}
+#back{display:none}
+#verify{display:none;font-size:.85rem;color:var(--warn);padding:.4rem .75rem;background:var(--bg)}
 #videos{display:none;position:relative;background:#000;aspect-ratio:16/9;max-height:42vh;width:100%}
 #videos.on{display:block}
 #remote{width:100%;height:100%;object-fit:contain}
-#local{position:absolute;right:.6rem;bottom:.6rem;width:26%;border-radius:8px;border:2px solid var(--surface);background:#222}
-#log{flex:1;overflow-y:auto;padding:1rem;display:flex;flex-direction:column;gap:.5rem}
-.empty{color:var(--mute);margin:auto;text-align:center;max-width:32ch}
-.m{max-width:80%;padding:.5rem .75rem;border-radius:12px;background:var(--surface);border:1px solid var(--line);overflow-wrap:anywhere;white-space:pre-wrap}
-.m.out{align-self:flex-end;background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
-.m.sys{align-self:center;background:none;border:none;color:var(--mute);font-size:.85rem;white-space:normal}
+#local{position:absolute;right:.6rem;bottom:.6rem;width:26%;border-radius:8px;border:2px solid var(--bg);background:#222}
+#log{flex:1;overflow-y:auto;padding:.75rem;display:flex;flex-direction:column;gap:.25rem}
+.empty{margin:auto;color:#fff;background:#0005;padding:.2rem .8rem;border-radius:999px;font-size:.85rem;text-align:center}
+.m{max-width:min(78%,34rem);padding:.35rem .6rem .25rem;border-radius:14px 14px 14px 4px;background:var(--in);overflow-wrap:anywhere;white-space:pre-wrap;box-shadow:0 1px 1px #0002;align-self:flex-start}
+.m.out{align-self:flex-end;background:var(--out);color:var(--out-ink);border-radius:14px 14px 4px 14px}
+.m.sys{align-self:center;background:#0005;color:#fff;font-size:.8rem;padding:.1rem .7rem;border-radius:999px;box-shadow:none;white-space:normal;margin:.3rem 0}
+.m small{float:right;margin:.55rem 0 0 .6rem;opacity:.6;font-size:.7rem}
 .f{display:flex;flex-direction:column;gap:.35rem;min-width:min(260px,100%)}
-.f .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
-.f small{opacity:.8}
+.f .row{display:flex;gap:.5rem;flex-wrap:wrap}.f .row button{border:1px solid currentColor}
+.f small{float:none;margin:0}.f a{color:inherit}
 progress{width:100%;height:.4rem;accent-color:currentColor}
-.m.out .f a{color:inherit}
-form{display:flex;gap:.5rem;padding:.75rem 1rem;border-top:1px solid var(--line)}
-#text{flex:1;min-width:0;font:inherit;padding:.55rem .75rem;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
-#drop{position:fixed;inset:0;background:color-mix(in srgb,var(--accent) 80%,transparent);color:var(--accent-ink);display:none;align-items:center;justify-content:center;font-size:1.4rem;z-index:9}
+#form{display:flex;gap:.4rem;padding:.5rem .6rem;background:var(--bg);align-items:center}
+#text{flex:1;min-width:0;font:inherit;padding:.6rem .9rem;border-radius:999px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+#send{background:var(--accent);color:#fff;border-radius:50%;width:2.5rem;height:2.5rem;padding:0}
+body:not(.has) #chat>header,body:not(.has) #form{display:none}
+#gate{position:fixed;inset:0;background:var(--bg);z-index:10;display:flex;align-items:center;justify-content:center;padding:1rem}
+#panel{max-width:26rem;width:100%;max-height:100%;overflow:auto;display:flex;flex-direction:column;gap:.75rem}
+#panel h2,#panel h3{margin:0}
+#panel input{font:inherit;padding:.55rem .75rem;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);width:100%}
+#panel button{border:1px solid var(--line)}#panel button.primary{border-color:var(--accent)}
+#panel label{display:flex;flex-direction:column;gap:.25rem;color:var(--mute);font-size:.9rem}
+#gateForm{display:flex;flex-direction:column;gap:.5rem;border:1px solid var(--line);border-radius:10px;padding:.75rem}
+#roomlist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.4rem}
+#roomlist li{display:flex;gap:.4rem;align-items:center}#roomlist span{flex:1;overflow-wrap:anywhere}
+#gateErr{color:var(--warn);margin:0}
+#drop{position:fixed;inset:0;background:color-mix(in srgb,var(--accent) 80%,transparent);color:#fff;display:none;align-items:center;justify-content:center;font-size:1.4rem;z-index:9}
 #drop.on{display:flex}
-@media (prefers-reduced-motion:no-preference){.m{animation:in .15s ease-out}@keyframes in{from{opacity:0;transform:translateY(4px)}}}
+@media (max-width:699px){#app{grid-template-columns:1fr}#chat{display:none}body.inchat #side{display:none}body.inchat #chat{display:flex}#back{display:inline-block}}
+</style>
 </style>
 </head>
 <body>
-<header>
-  <h1>Direct room</h1>
-  <div id="status"><span id="dot"></span><span id="stxt">Connecting…</span></div>
-  <div style="display:flex;gap:.5rem">
-    <button id="lock">Lock</button>
+<div id="app">
+<aside id="side">
+  <div class="top"><button id="manage" aria-label="Settings">☰</button><b>Chats</b><button id="addbtn" aria-label="New chat">＋</button></div>
+  <ul id="chats"></ul>
+</aside>
+<section id="chat">
+  <header>
+    <button id="back" aria-label="Back">‹</button>
+    <div class="av" id="hav"></div>
+    <div class="who"><b id="hname"></b><small id="status"><span id="dot"></span><span id="stxt"></span></small></div>
     <button id="call" disabled>Start call</button>
-  </div>
+  </header>
   <div id="verify">Security check failed. The other side does not know your passphrase, or the connection was tampered with. It was closed.</div>
-</header>
-<div id="videos"><video id="remote" autoplay playsinline></video><video id="local" autoplay playsinline muted></video></div>
-<main id="log" aria-live="polite"><p class="empty" id="empty">Messages are saved, encrypted with your passphrase. Files and calls go straight between your browsers.</p></main>
-<form id="form">
-  <button type="button" id="attach" disabled aria-label="Send files">Files</button>
-  <input id="text" placeholder="Message" autocomplete="off" disabled>
-  <button class="primary" disabled id="send">Send</button>
-  <input type="file" id="picker" multiple hidden>
-</form>
-<div id="gate"><form id="gateForm"><h2>Private room</h2><p>Enter the passphrase you and the other person agreed on. Use something long, like four random words.</p><input id="pass" type="password" autocomplete="current-password" aria-label="Passphrase" style="font:inherit;padding:.55rem .75rem;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink)"><button class="primary">Unlock</button><p id="gateErr"></p></form></div>
+  <div id="videos"><video id="remote" autoplay playsinline></video><video id="local" autoplay playsinline muted></video></div>
+  <main id="log" aria-live="polite"><p class="empty" id="empty">Select a chat to start messaging</p></main>
+  <form id="form">
+    <button type="button" id="attach" disabled aria-label="Send files">📎</button>
+    <input id="text" placeholder="Message" autocomplete="off" disabled>
+    <button id="send" disabled aria-label="Send">➤</button>
+    <input type="file" id="picker" multiple hidden>
+  </form>
+</section>
+</div>
+<div id="gate"><div id="panel">
+  <h2>Settings</h2>
+  <label>ur name<input id="myname" maxlength="30" placeholder="self explanatory" autocomplete="off"></label>
+  <ul id="roomlist"></ul>
+  <form id="gateForm">
+    <h3>New chat</h3>
+    <input id="rname" maxlength="40" placeholder="chat name" autocomplete="off" aria-label="Chat name">
+    <input id="pass" type="password" placeholder="shared password" autocomplete="off" aria-label="Passphrase">
+    <button class="primary">Save and open</button>
+    <p id="gateErr" role="alert"></p>
+  </form>
+  <button type="button" id="closePanel">Close</button>
+</div></div>
 <div id="drop">Drop files to send</div>
 
 <script>
@@ -82,18 +125,19 @@ const cid = sessionStorage.getItem("cid") || rid(16); // per-tab, so two tabs ca
 sessionStorage.setItem("cid", cid);
 
 let dev; try { dev = localStorage.getItem("p2pdev") || rid(12); localStorage.setItem("p2pdev", dev); } catch { dev = rid(12); }
-const seen = new Set(); let last = 0;
+const seen = new Set(); let last = 0, gen = 0, lastDay = "";
 let ws, retry = 0, iceServers = [{ urls: "stun:stun.cloudflare.com:3478" }];
 let pc, dc, polite = false, makingOffer = false, ignoreOffer = false, localStream = null;
 
 /* ---------- UI helpers ---------- */
-function status(t, cls) { $("#stxt").textContent = t; $("#dot").className = cls || ""; }
-function bubble(cls) { $("#empty")?.remove(); const d = document.createElement("div"); d.className = "m " + cls; $("#log").append(d); d.scrollIntoView({ block: "end" }); return d; }
+const el = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; };
+const clock = ts => new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+const stamp = ts => { const d = new Date(ts); return d.toDateString() === new Date().toDateString() ? clock(ts) : d.toLocaleDateString([], { month: "short", day: "numeric" }); };
+function avatar(e, name) { e.textContent = (name || "?").trim().charAt(0).toUpperCase(); e.style.background = `hsl(${[...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7)} 50% 46%)`; }
+function status(t, cls) { $("#stxt").textContent = (cur?.peer ? cur.peer + " · " : "") + t; $("#dot").className = cls || ""; }
+function bubble(cls) { $("#empty")?.remove(); const d = el("div", "m " + cls); $("#log").append(d); d.scrollIntoView({ block: "end" }); return d; }
 function sys(t) { bubble("sys").textContent = t; }
-function msg(t, dir, ts) {
-  const b = bubble(dir); b.textContent = t;
-  if (ts) { const s = document.createElement("small"); s.style.cssText = "display:block;opacity:.7;font-size:.75rem"; s.textContent = new Date(ts).toLocaleString([], { dateStyle: "short", timeStyle: "short" }); b.append(s); }
-}
+function msg(t, dir, ts) { const b = bubble(dir); b.textContent = t; if (ts) b.append(el("small", null, clock(ts) + (dir === "out" ? " ✓" : ""))); }
 function enable(on) { for (const id of ["#attach", "#call"]) $(id).disabled = !on; } // files and calls need the direct link
 function chatEnable(on) { for (const id of ["#text", "#send"]) $(id).disabled = !on; }
 
@@ -131,7 +175,7 @@ function connect() {
     if (e.code === 4003) { status("This room already has two people.", "bad"); return; }
     if (e.code === 4000) return; // another tab took over this client id
     chatEnable(false); status("Reconnecting to the server…", "bad");
-    setTimeout(connect, Math.min(1000 * 2 ** retry++, 15000));
+    retryTimer = setTimeout(connect, Math.min(1000 * 2 ** retry++, 15000));
   };
 }
 
@@ -310,12 +354,11 @@ $("#form").onsubmit = async e => {
   e.preventDefault();
   const t = $("#text").value.trim().slice(0, 4000); if (!t) return;
   $("#text").value = "";
-  sig({ type: "store", sender: dev, body: await encText(JSON.stringify({ text: t })) });
+  sig({ type: "store", sender: dev, body: await encText(JSON.stringify({ text: t, name: myName() })) });
 };
 $("#attach").onclick = () => $("#picker").click();
 $("#picker").onchange = e => { queueFiles([...e.target.files]); e.target.value = ""; };
 $("#call").onclick = toggleCall;
-$("#lock").onclick = () => { localStorage.removeItem("p2pkey"); location.reload(); };
 let dragDepth = 0;
 addEventListener("dragenter", e => { e.preventDefault(); dragDepth++; $("#drop").classList.add("on"); });
 addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; $("#drop").classList.remove("on"); } });
@@ -330,39 +373,166 @@ async function encText(text) {
   const out = new Uint8Array(12 + ct.length); out.set(iv); out.set(ct, 12);
   return b64u(out);
 }
-async function decText(b) {
+async function decText(b, key = encKey) {
   const a = unb64u(b);
-  return new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: a.slice(0, 12) }, encKey, a.slice(12)));
+  return new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: a.slice(0, 12) }, key, a.slice(12)));
 }
-async function show(m) {
+async function show(m, live) {
   if (seen.has(m.id)) return;
   seen.add(m.id); last = Math.max(last, m.id);
-  let t; try { t = JSON.parse(await decText(m.body)).text; } catch { return; } // not encrypted with our key: ignore
-  msg(String(t), m.sender === dev ? "out" : "in", m.ts);
+  const g = gen, r = cur;
+  let p; try { p = JSON.parse(await decText(m.body)); } catch { return; } // not made with our key: ignore
+  if (g !== gen) return; // chat was switched meanwhile
+  const mine = m.sender === dev, day = new Date(m.ts).toDateString();
+  if (day !== lastDay) { lastDay = day; sys(new Date(m.ts).toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" })); }
+  msg(String(p.text), mine ? "out" : "in", m.ts);
+  r.hi = Math.max(r.hi || 0, m.id); r.last = String(p.text).slice(0, 80); r.ts = m.ts;
+  const viewing = !(innerWidth < 700 && !document.body.classList.contains("inchat"));
+  if (!mine) {
+    if (p.name) { r.peer = String(p.name).slice(0, 30); $("#stxt").textContent = r.peer + " · " + $("#stxt").textContent.replace(/^.* · /, ""); }
+    r.unread = viewing ? 0 : (r.unread || 0) + 1;
+    if (live) ping(r, r.last);
+  } else r.unread = 0;
+  saveSoon(); renderChats();
 }
 async function derive(pass) {
   const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pass.normalize("NFKC").trim()), "PBKDF2", false, ["deriveBits"]);
   return new Uint8Array(await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: new TextEncoder().encode("p2p-room-v1"), iterations: 310000 }, base, 512));
 }
-async function start(bits) {
-  room = b64u(bits.slice(0, 32));
-  macKey = await crypto.subtle.importKey("raw", bits.slice(32), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+/* ---------- Chats ---------- */
+let rooms = [], cur = null, retryTimer = null, iceLoaded = false, saveT;
+const load = () => { try { rooms = JSON.parse(localStorage.getItem("p2prooms") || "[]"); } catch { rooms = []; } };
+const save = () => { try { localStorage.setItem("p2prooms", JSON.stringify(rooms.map(({ name, key, last, ts, unread, hi, peer }) => ({ name, key, last, ts, unread, hi, peer })))); } catch {} };
+const saveSoon = () => { clearTimeout(saveT); saveT = setTimeout(save, 300); };
+const myName = () => { try { return (localStorage.getItem("p2pname") || "").trim().slice(0, 30); } catch { return ""; } };
+const err = t => { $("#gateErr").textContent = t; };
+const openPanel = () => { $("#closePanel").hidden = !rooms.length; $("#gate").style.display = "flex"; };
+const closePanel = () => { $("#gate").style.display = "none"; };
+const ping = (r, t) => { if (window.Notification && Notification.permission === "granted" && (document.hidden || r !== cur)) new Notification(r.name, { body: t }); };
+
+async function prep(r) { // derive this chat's keys from its stored secret
+  if (r.enc) return;
+  const bits = unb64u(r.key);
+  r.id = b64u(bits.slice(0, 32)); // the only thing the server ever sees
+  r.mac = await crypto.subtle.importKey("raw", bits.slice(32), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const hk = await crypto.subtle.importKey("raw", bits.slice(32), "HKDF", false, ["deriveKey"]);
-  encKey = await crypto.subtle.deriveKey({ name: "HKDF", hash: "SHA-256", salt: new Uint8Array(), info: new TextEncoder().encode("p2p-room-msg-v1") }, hk, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
-  $("#gate").style.display = "none";
-  try { const r = await fetch("/api/ice"); if (r.ok) iceServers = (await r.json()).iceServers; } catch {}
-  connect();
+  r.enc = await crypto.subtle.deriveKey({ name: "HKDF", hash: "SHA-256", salt: new Uint8Array(), info: new TextEncoder().encode("p2p-room-msg-v1") }, hk, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
 }
+
+function renderChats() {
+  const ul = $("#chats"); ul.replaceChildren();
+  for (const r of [...rooms].sort((a, b) => (b.ts || 0) - (a.ts || 0))) {
+    const li = el("li", r === cur ? "on" : ""), a = el("div", "av"), mid = el("div", "mid"), r1 = el("div", "r1"), r2 = el("div", "r2");
+    avatar(a, r.name);
+    r1.append(el("b", null, r.name), el("time", null, r.ts ? stamp(r.ts) : ""));
+    r2.append(el("span", null, r.last || "No messages yet"));
+    if (r.unread && r !== cur || r.unread && innerWidth < 700 && !document.body.classList.contains("inchat")) r2.append(el("i", "badge", r.unread));
+    mid.append(r1, r2); li.append(a, mid);
+    li.onclick = () => { if (r !== cur) openRoom(r); else document.body.classList.add("inchat"); };
+    ul.append(li);
+  }
+}
+
+function renderRooms() {
+  renderChats();
+  const ul = $("#roomlist"); ul.replaceChildren();
+  for (const r of rooms) {
+    const li = el("li"), btn = (label, fn) => Object.assign(el("button", null, label), { type: "button", onclick: fn });
+    li.append(el("span", null, r.name),
+      btn("Open", () => { closePanel(); if (r !== cur) openRoom(r); else document.body.classList.add("inchat"); }),
+      btn("Rename", () => { const v = prompt("Chat name", r.name); if (v && v.trim()) { r.name = v.trim().slice(0, 40); save(); renderRooms(); if (r === cur) { $("#hname").textContent = r.name; avatar($("#hav"), r.name); } } }),
+      btn("Remove", () => {
+        if (!confirm("Remove “" + r.name + "” from this device? Saved messages stay on the server and return if you add it again with the same passphrase.")) return;
+        stopListen(r); rooms = rooms.filter(x => x !== r); save();
+        if (cur === r) { leaveRoom(); cur = null; document.body.classList.remove("has"); $("#empty").textContent = "Select a chat to start messaging"; }
+        renderRooms();
+        if (!cur) { if (rooms.length) openRoom(rooms[0]); else { status("No chat selected"); openPanel(); } }
+      }));
+    ul.append(li);
+  }
+}
+
+// Background chats: a silent socket per non-open chat, so previews and unread counts stay current.
+function listen(r) {
+  if (r === cur || r.ls || !r.enc) return;
+  const w = r.ls = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/${r.id}?cid=${cid}l&listen=1`);
+  w.onopen = () => { r.lr = 0; w.send(JSON.stringify({ type: "sync", after: r.hi || 0 })); };
+  w.onmessage = async e => {
+    const m = JSON.parse(e.data);
+    if (m.type === "history") { const quiet = r.hi === undefined; for (const x of m.msgs) await note(r, x, false, quiet); }
+    else if (m.type === "msg") await note(r, m.msg, true, false);
+  };
+  w.onclose = () => { if (r.ls === w) r.ls = null; if (r !== cur && rooms.includes(r)) setTimeout(() => listen(r), Math.min(1000 * 2 ** (r.lr = (r.lr || 0) + 1), 30000)); };
+}
+function stopListen(r) { if (r.ls) { r.ls.onclose = null; r.ls.close(); r.ls = null; } }
+async function note(r, x, live, quiet) {
+  if (x.id <= (r.hi || 0)) return;
+  r.hi = x.id;
+  let p; try { p = JSON.parse(await decText(x.body, r.enc)); } catch { return; }
+  r.last = String(p.text).slice(0, 80); r.ts = x.ts;
+  if (x.sender !== dev) {
+    if (p.name) r.peer = String(p.name).slice(0, 30);
+    if (!quiet) { r.unread = (r.unread || 0) + 1; if (live) ping(r, r.last); }
+  }
+  saveSoon(); renderChats();
+}
+
+function leaveRoom() {
+  gen++; clearTimeout(retryTimer);
+  if (localStream) toggleCall();
+  if (ws) { ws.onclose = ws.onmessage = null; ws.close(); ws = null; }
+  closePeer(); chatEnable(false);
+  seen.clear(); last = 0; retry = 0; lastDay = "";
+  $("#log").replaceChildren(el("p", "empty", "No messages yet. Say hello.")); $("#log").firstChild.id = "empty";
+}
+
+async function openRoom(r) {
+  const old = cur;
+  leaveRoom(); cur = r; stopListen(r);
+  if (old && old !== r) listen(old);
+  document.body.classList.add("has", "inchat");
+  try { localStorage.setItem("p2pcur", r.key); } catch {}
+  await prep(r); if (cur !== r) return;
+  room = r.id; macKey = r.mac; encKey = r.enc; r.unread = 0;
+  avatar($("#hav"), r.name); $("#hname").textContent = r.name; document.title = r.name;
+  renderRooms(); status("Connecting…");
+  const g = gen;
+  if (!iceLoaded) { try { const x = await fetch("/api/ice"); if (x.ok) { iceServers = (await x.json()).iceServers; iceLoaded = true; } } catch {} }
+  if (g === gen) connect();
+}
+
 $("#gateForm").onsubmit = async e => {
   e.preventDefault();
-  const v = $("#pass").value;
-  if (v.trim().length < 12) { $("#gateErr").textContent = "Use at least 12 characters."; return; }
-  $("#gateErr").textContent = "Unlocking…";
-  const bits = await derive(v);
-  localStorage.setItem("p2pkey", b64u(bits)); // stays on this device until you press Lock
-  $("#pass").value = ""; start(bits);
+  const name = $("#rname").value.trim(), v = $("#pass").value;
+  if (!name) { err("Give the chat a name."); return; }
+  if (v.trim().length < 12) { err("Use at least 12 characters."); return; }
+  err("Working…");
+  const key = b64u(await derive(v));
+  let r = rooms.find(x => x.key === key);
+  if (!r) { r = { name: name.slice(0, 40), key }; rooms.push(r); save(); }
+  $("#pass").value = $("#rname").value = ""; err("");
+  if (window.Notification && Notification.permission === "default") Notification.requestPermission();
+  closePanel(); openRoom(r);
 };
-try { const k = localStorage.getItem("p2pkey"); if (k) start(unb64u(k)); else $("#pass").focus(); } catch { $("#pass").focus(); }
+$("#myname").value = myName();
+$("#myname").oninput = e => { try { localStorage.setItem("p2pname", e.target.value.trim().slice(0, 30)); } catch {} };
+$("#manage").onclick = openPanel;
+$("#addbtn").onclick = () => { openPanel(); $("#rname").focus(); };
+$("#closePanel").onclick = closePanel;
+$("#back").onclick = () => { document.body.classList.remove("inchat"); renderChats(); };
+
+load();
+try { const old = localStorage.getItem("p2pkey"); if (old && !rooms.length) { rooms.push({ name: "My chat", key: old }); save(); localStorage.removeItem("p2pkey"); } } catch {}
+renderRooms();
+(async () => {
+  for (const r of rooms) await prep(r);
+  let saved = null; try { saved = localStorage.getItem("p2pcur"); } catch {}
+  const first = rooms.find(r => r.key === saved) || rooms[0];
+  if (!first) { status("No chat selected"); openPanel(); return; }
+  closePanel(); openRoom(first);
+  if (innerWidth < 700) document.body.classList.remove("inchat"); // phones start on the chat list
+  rooms.forEach(listen);
+})();
 </script>
 </body>
 </html>
